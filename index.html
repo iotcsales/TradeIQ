@@ -194,6 +194,9 @@
   <div class="section-title" id="flagsTitle">signals &amp; flags</div>
   <div class="score-panel" style="padding:4px 14px;" id="flagsList"></div>
 
+  <div class="section-title" id="marketSpecificTitle" style="display:none;">market-specific signals</div>
+  <div class="score-panel" style="padding:4px 14px; display:none;" id="marketSpecificList"></div>
+
   <div class="mode-toggle">
     <span class="txt">quick mode (hide explainers)</span>
     <div class="switch" id="quickSwitch"><div class="knob"></div></div>
@@ -211,7 +214,7 @@
 
 <script>
 /* =========================================================================
-   TradeOS — data acquisition config
+   TradeIQ — data acquisition config
    ========================================================================= */
 
 const WORKER_URL = "https://tradeos-worker.iotcsales.workers.dev";
@@ -224,14 +227,19 @@ const SUGGESTED_TICKERS = [
 ];
 
 /* =========================================================================
-   TradeOS — scoring configuration (explicit, auditable weights)
+   TradeIQ — scoring configuration (explicit, auditable weights)
    ========================================================================= */
 
-const SCORE_CONFIG = {
-  technicalWeight: 0.50,
-  fundamentalWeight: 0.50,
-  verdicts: { constructive: 70, mixed: 45 },
-  scoringEngineVersion: "1.0.0",
+// methodology-v1.0: market-specific factors (promoter/pledge, insider/
+// institutional) do NOT count toward the universal 50/50 split — they're
+// scored and displayed separately. This keeps "fundamental score" meaning
+// the same thing across markets regardless of how many local factors a
+// given market has, rather than silently diluting or skewing the universal
+// average by however many region-specific signals happen to be available.
+const SCORING_CONFIG = {
+  version: "1.0.0",
+  weights: { technical: 0.50, fundamental: 0.50 },
+  thresholds: { constructive: 70, mixed: 45 },
 };
 
 function clamp(n, lo, hi) { return Math.max(lo, Math.min(hi, n)); }
@@ -247,7 +255,7 @@ function statusFromScore(score) {
 }
 
 /* =========================================================================
-   TradeOS — factor scorers
+   TradeIQ — factor scorers
    Each returns { score: 0-100|null, status, value } where `value` is a
    plain-language summary built from the actual normalized data — never a
    hard-coded description that could claim an indicator exists when it
@@ -367,7 +375,7 @@ function bucketScore(val, thresholds, scores) {
 function fmtPct(decimal) { return (decimal * 100).toFixed(1) + "%"; }
 
 /* =========================================================================
-   TradeOS — manual-entry field metadata and local override storage
+   TradeIQ — manual-entry field metadata and local override storage
    Values persist per-ticker in this browser's localStorage only — they are
    not sent anywhere and don't sync across devices. "percent" fields are
    entered by the person as a plain percentage (e.g. "51.8") and stored
@@ -453,7 +461,7 @@ function clearManualField(ticker, fieldKey) {
 }
 
 /* =========================================================================
-   TradeOS — dedicated scoring engine
+   TradeIQ — dedicated scoring engine
    Consumes the normalized instrument contract only. No indicator math is
    redone here (Wilder RSI/ATR, MACD, Bollinger all come from the Worker).
    ========================================================================= */
@@ -555,13 +563,15 @@ function calculateTradeScore(instrument, overriddenFieldKeys = new Set()) {
   const manualFallback = instrument.manualFallback || [];
 
   const technicalFactors = renderTechnicalFactors(instrument);
-  const fundamentalFactors = [
-    ...renderFundamentalFactors(instrument, manualFallback, overriddenFieldKeys),
-    ...renderMarketSpecificFactors(instrument, manualFallback, overriddenFieldKeys),
-  ];
+  const universalFundamentalFactors = renderFundamentalFactors(instrument, manualFallback, overriddenFieldKeys);
+  const marketSpecificFactors = renderMarketSpecificFactors(instrument, manualFallback, overriddenFieldKeys);
 
   const technicalScore = groupScore(technicalFactors);
-  const fundamentalScore = groupScore(fundamentalFactors);
+  // methodology-v1.0: only universal factors (valuation, health, growth,
+  // quality) count toward fundamentalScore. Market-specific factors are
+  // scored and shown, but deliberately excluded here — see SCORING_CONFIG
+  // comment above for why.
+  const fundamentalScore = groupScore(universalFundamentalFactors);
 
   // If one whole side is unavailable, fall back to the side that exists
   // rather than inventing a zero for the missing half. The composite's
@@ -569,7 +579,7 @@ function calculateTradeScore(instrument, overriddenFieldKeys = new Set()) {
   // a separately invented frontend confidence score.
   let rawComposite;
   if (technicalScore != null && fundamentalScore != null) {
-    rawComposite = technicalScore * SCORE_CONFIG.technicalWeight + fundamentalScore * SCORE_CONFIG.fundamentalWeight;
+    rawComposite = technicalScore * SCORING_CONFIG.weights.technical + fundamentalScore * SCORING_CONFIG.weights.fundamental;
   } else if (technicalScore != null) {
     rawComposite = technicalScore;
   } else if (fundamentalScore != null) {
@@ -582,8 +592,8 @@ function calculateTradeScore(instrument, overriddenFieldKeys = new Set()) {
 
   let verdict = "unavailable";
   if (compositeScore != null) {
-    if (compositeScore >= SCORE_CONFIG.verdicts.constructive) verdict = "constructive";
-    else if (compositeScore >= SCORE_CONFIG.verdicts.mixed) verdict = "mixed";
+    if (compositeScore >= SCORING_CONFIG.thresholds.constructive) verdict = "constructive";
+    else if (compositeScore >= SCORING_CONFIG.thresholds.mixed) verdict = "mixed";
     else verdict = "caution";
   }
 
@@ -592,17 +602,20 @@ function calculateTradeScore(instrument, overriddenFieldKeys = new Set()) {
     fundamentalScore,
     compositeScore,
     verdict,
-    factorScores: { technical: technicalFactors, fundamental: fundamentalFactors },
-    weights: { technicalWeight: SCORE_CONFIG.technicalWeight, fundamentalWeight: SCORE_CONFIG.fundamentalWeight },
+    factorScores: { technical: technicalFactors, fundamental: universalFundamentalFactors, marketSpecific: marketSpecificFactors },
+    weights: { technicalWeight: SCORING_CONFIG.weights.technical, fundamentalWeight: SCORING_CONFIG.weights.fundamental },
     confidence: instrument.dataQuality ? instrument.dataQuality.confidence : { level: "unknown" },
-    flags: [...technicalFactors, ...fundamentalFactors],
+    // "flags" holds only what counts toward the universal 50/50 score.
+    // Market-specific signals are kept separate — see marketSpecificFactors.
+    flags: [...technicalFactors, ...universalFundamentalFactors],
+    marketSpecificFactors,
     methodologyVersion: instrument.meta?.methodologyVersion || null,
-    scoringEngineVersion: SCORE_CONFIG.scoringEngineVersion,
+    scoringEngineVersion: SCORING_CONFIG.version,
   };
 }
 
 /* =========================================================================
-   TradeOS — response contract validation
+   TradeIQ — response contract validation
    ========================================================================= */
 
 function validateContract(data) {
@@ -618,7 +631,7 @@ function validateContract(data) {
 }
 
 /* =========================================================================
-   TradeOS — data acquisition with stale-response protection
+   TradeIQ — data acquisition with stale-response protection
    ========================================================================= */
 
 let currentRequestId = 0;
@@ -740,7 +753,7 @@ function rescore() {
 }
 
 /* =========================================================================
-   TradeOS — rendering (presentation only; no scoring logic here)
+   TradeIQ — rendering (presentation only; no scoring logic here)
    ========================================================================= */
 
 const EXPLAINERS = {
@@ -811,6 +824,8 @@ function renderLoading() {
   document.getElementById("scorePanel").innerHTML = '<div class="state-msg">Loading TradeIQ analysis…</div>';
   document.getElementById("flagsList").innerHTML = "";
   document.getElementById("flagsTitle").textContent = "signals & flags";
+  document.getElementById("marketSpecificTitle").style.display = "none";
+  document.getElementById("marketSpecificList").style.display = "none";
 }
 
 function renderError(message) {
@@ -829,6 +844,8 @@ function renderError(message) {
   panel.appendChild(msg);
   document.getElementById("flagsList").innerHTML = "";
   document.getElementById("flagsTitle").textContent = "signals & flags";
+  document.getElementById("marketSpecificTitle").style.display = "none";
+  document.getElementById("marketSpecificList").style.display = "none";
 }
 
 function renderResult() {
@@ -875,31 +892,52 @@ function renderResult() {
 
   const flagsList = document.getElementById("flagsList");
   flagsList.innerHTML = "";
-  score.flags.forEach((f) => {
-    const row = document.createElement("div");
-    row.className = "flag-row";
-    const dotColor = statusColor(f.status);
-    const tag = f.source === "manual_needed" ? '<span class="flag-tag">manual entry needed</span>' : "";
-    const manualHtml = renderManualEntrySection(f);
-    row.innerHTML = `
-      <div class="flag-top">
-        <div class="flag-dot" style="background:${dotColor}"></div>
-        <div class="flag-name">${escapeHtml(f.label)}</div>
-        ${tag}
-        <div class="flag-value">${escapeHtml(f.value)}</div>
-        <div class="flag-chevron">${quickMode ? "" : "›"}</div>
-      </div>
-      ${manualHtml ? `<div class="manual-entry-row">${manualHtml}</div>` : ""}
-      ${quickMode ? "" : `<div class="flag-explainer">${escapeHtml(EXPLAINERS[f.key] || "")}</div>`}
-    `;
-    if (!quickMode) row.onclick = () => row.classList.toggle("open");
-    else row.style.cursor = "default";
-    wireManualEntryEvents(row);
-    flagsList.appendChild(row);
-  });
+  score.flags.forEach((f) => flagsList.appendChild(buildFlagRow(f)));
 
   document.getElementById("flagsTitle").textContent =
     "signals & flags" + (quickMode ? " · quick mode" : " · tap to explain");
+
+  // Market-specific signals (promoter/pledge for NSE, insider/institutional
+  // for US) are shown separately and never folded into the universal
+  // technical/fundamental score above — see SCORING_CONFIG.
+  const marketList = document.getElementById("marketSpecificList");
+  const marketTitle = document.getElementById("marketSpecificTitle");
+  marketList.innerHTML = "";
+  if (score.marketSpecificFactors && score.marketSpecificFactors.length > 0) {
+    score.marketSpecificFactors.forEach((f) => marketList.appendChild(buildFlagRow(f)));
+    marketTitle.style.display = "";
+    marketList.style.display = "";
+    marketTitle.textContent = "market-specific signals" + (quickMode ? " · quick mode" : " · tap to explain");
+  } else {
+    marketTitle.style.display = "none";
+    marketList.style.display = "none";
+  }
+}
+
+// Builds one interactive flag row (used for both the universal signals list
+// and the separate market-specific signals list) — shared so the two
+// sections stay visually and behaviorally identical.
+function buildFlagRow(f) {
+  const row = document.createElement("div");
+  row.className = "flag-row";
+  const dotColor = statusColor(f.status);
+  const tag = f.source === "manual_needed" ? '<span class="flag-tag">manual entry needed</span>' : "";
+  const manualHtml = renderManualEntrySection(f);
+  row.innerHTML = `
+    <div class="flag-top">
+      <div class="flag-dot" style="background:${dotColor}"></div>
+      <div class="flag-name">${escapeHtml(f.label)}</div>
+      ${tag}
+      <div class="flag-value">${escapeHtml(f.value)}</div>
+      <div class="flag-chevron">${quickMode ? "" : "›"}</div>
+    </div>
+    ${manualHtml ? `<div class="manual-entry-row">${manualHtml}</div>` : ""}
+    ${quickMode ? "" : `<div class="flag-explainer">${escapeHtml(EXPLAINERS[f.key] || "")}</div>`}
+  `;
+  if (!quickMode) row.onclick = () => row.classList.toggle("open");
+  else row.style.cursor = "default";
+  wireManualEntryEvents(row);
+  return row;
 }
 
 // Builds the inline manual-entry HTML for a flag: an input+Save per still-
@@ -993,7 +1031,7 @@ document.getElementById("tickerInput").value = currentTicker;
 // the browser; used by the Node-based synthetic contract test harness).
 if (typeof globalThis !== "undefined") {
   globalThis.TradeIQ = {
-    calculateTradeScore, validateContract, SCORE_CONFIG,
+    calculateTradeScore, validateContract, SCORING_CONFIG,
     applyManualOverrides, saveManualField, clearManualField, FIELD_META,
   };
 }
