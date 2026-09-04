@@ -17,6 +17,7 @@
     --bull:#3FB68B;
     --bear:#E4573D;
     --gold:#D4A73C;
+    --manual:#6C8EEF;
     --mono: 'IBM Plex Mono', ui-monospace, monospace;
     --sans: 'IBM Plex Sans', -apple-system, sans-serif;
   }
@@ -116,6 +117,27 @@
     border-radius:2px; padding:1px 4px; margin-right:6px; white-space:nowrap;
   }
   .flag-value{font-family:var(--mono); font-size:12.5px; color:var(--muted);}
+
+  .manual-entry-row{
+    display:flex; flex-wrap:wrap; gap:8px; margin-top:8px; padding-left:18px;
+  }
+  .manual-filled-tag{
+    font-family:var(--mono); font-size:10.5px; color:var(--manual); border:1px solid var(--manual);
+    border-radius:2px; padding:2px 6px; white-space:nowrap; display:inline-flex; align-items:center; gap:6px;
+  }
+  .manual-clear-btn{cursor:pointer; opacity:.7; font-size:11px;}
+  .manual-clear-btn:hover{opacity:1;}
+  .manual-input-group{display:inline-flex; align-items:center; gap:5px;}
+  .manual-input-group label{font-family:var(--mono); font-size:10.5px; color:var(--muted); white-space:nowrap;}
+  .manual-input-group input{
+    width:72px; background:var(--panel-raised); border:1px solid var(--line); color:var(--paper);
+    font-family:var(--mono); font-size:11.5px; padding:4px 6px; border-radius:3px; outline:none;
+  }
+  .manual-input-group input:focus{border-color:var(--gold);}
+  .manual-save-btn{
+    font-family:var(--mono); font-size:10.5px; background:var(--gold); color:var(--ink);
+    border-radius:3px; padding:3px 8px; cursor:pointer; white-space:nowrap;
+  }
   .flag-chevron{color:var(--muted); font-size:11px; transition:transform .15s; width:12px; text-align:center;}
   .flag-row.open .flag-chevron{transform:rotate(90deg);}
   .flag-explainer{
@@ -174,6 +196,7 @@
   <div class="guardrail">
     Educational tool, not investment advice. Based on disclosed methodology
     with known error margin — not a prediction of future returns.
+    Manually entered values are saved in this browser only.
   </div>
 
   <div class="footer-credit">Built by Team IOTC</div>
@@ -338,6 +361,92 @@ function bucketScore(val, thresholds, scores) {
 function fmtPct(decimal) { return (decimal * 100).toFixed(1) + "%"; }
 
 /* =========================================================================
+   TradeOS — manual-entry field metadata and local override storage
+   Values persist per-ticker in this browser's localStorage only — they are
+   not sent anywhere and don't sync across devices. "percent" fields are
+   entered by the person as a plain percentage (e.g. "51.8") and stored
+   internally as a decimal (0.518) to match the Worker's convention; "raw"
+   fields (ratios like P/E) are stored exactly as entered.
+   ========================================================================= */
+
+const FIELD_META = {
+  pe: { label: "P/E", unit: "raw", placeholder: "24.6" },
+  pb: { label: "P/B", unit: "raw", placeholder: "2.1" },
+  debtEquity: { label: "Debt/Equity", unit: "raw", placeholder: "0.37" },
+  currentRatio: { label: "Current Ratio", unit: "raw", placeholder: "1.20" },
+  revenueGrowthYoY: { label: "Revenue growth YoY", unit: "percent", placeholder: "12.5" },
+  earningsGrowthYoY: { label: "Earnings growth YoY", unit: "percent", placeholder: "8.0" },
+  roe: { label: "ROE", unit: "percent", placeholder: "15.0" },
+  promoterHoldingPct: { label: "Promoter holding", unit: "percent", placeholder: "51.8" },
+  pledgedSharesPct: { label: "Pledged shares", unit: "percent", placeholder: "0.0" },
+  insiderOwnershipPct: { label: "Insider ownership", unit: "percent", placeholder: "1.6" },
+  institutionalOwnershipPct: { label: "Institutional ownership", unit: "percent", placeholder: "66.4" },
+};
+
+const MANUAL_OVERRIDES_STORAGE_KEY = "tradeiq_manual_overrides";
+
+function loadManualOverrides() {
+  try {
+    return JSON.parse(localStorage.getItem(MANUAL_OVERRIDES_STORAGE_KEY) || "{}");
+  } catch (e) {
+    return {}; // storage unavailable (e.g. private browsing) — fall back to session-only
+  }
+}
+function saveManualOverridesToStorage(overrides) {
+  try {
+    localStorage.setItem(MANUAL_OVERRIDES_STORAGE_KEY, JSON.stringify(overrides));
+  } catch (e) {
+    // storage unavailable — overrides still work for this session via the in-memory object
+  }
+}
+
+let manualOverrides = loadManualOverrides(); // { [ticker]: { [fieldKey]: normalizedValue } }
+
+// Applies this browser's saved manual values on top of a freshly-fetched
+// instrument. Returns a new object — never mutates the raw Worker response,
+// so overrides can be added/edited/cleared without re-fetching.
+function applyManualOverrides(rawInstrument, ticker) {
+  const overrides = manualOverrides[ticker] || {};
+  const clone = {
+    ...rawInstrument,
+    fundamental: {
+      valuation: { ...rawInstrument.fundamental.valuation },
+      health: { ...rawInstrument.fundamental.health },
+      growth: { ...rawInstrument.fundamental.growth },
+      quality: { ...rawInstrument.fundamental.quality },
+    },
+    marketSpecific: { ...rawInstrument.marketSpecific },
+  };
+  for (const [key, val] of Object.entries(overrides)) {
+    if (key in clone.fundamental.valuation) clone.fundamental.valuation[key] = val;
+    else if (key in clone.fundamental.health) clone.fundamental.health[key] = val;
+    else if (key in clone.fundamental.growth) clone.fundamental.growth[key] = val;
+    else if (key in clone.fundamental.quality) clone.fundamental.quality[key] = val;
+    else if (key in clone.marketSpecific) clone.marketSpecific[key] = val;
+  }
+  return clone;
+}
+
+function saveManualField(ticker, fieldKey, rawValue) {
+  const meta = FIELD_META[fieldKey];
+  if (!meta) return false;
+  const parsed = parseFloat(rawValue);
+  if (isNaN(parsed)) return false;
+  const normalized = meta.unit === "percent" ? parsed / 100 : parsed;
+  if (!manualOverrides[ticker]) manualOverrides[ticker] = {};
+  manualOverrides[ticker][fieldKey] = normalized;
+  saveManualOverridesToStorage(manualOverrides);
+  return true;
+}
+
+function clearManualField(ticker, fieldKey) {
+  if (manualOverrides[ticker]) {
+    delete manualOverrides[ticker][fieldKey];
+    saveManualOverridesToStorage(manualOverrides);
+  }
+}
+
+/* =========================================================================
    TradeOS — dedicated scoring engine
    Consumes the normalized instrument contract only. No indicator math is
    redone here (Wilder RSI/ATR, MACD, Bollinger all come from the Worker).
@@ -357,46 +466,76 @@ const FUNDAMENTAL_FACTORS = [
   { key: "quality", label: "Quality (ROE)", scorer: (i) => scoreQuality(i.fundamental.quality), fields: ["roe"] },
 ];
 
-function tagManualFallback(factorResult, fieldKeys, manualFallback) {
-  if (factorResult.score != null) return { ...factorResult, source: "live" };
-  const needsManual = (fieldKeys || []).some((f) => (manualFallback || []).includes(f));
-  return { ...factorResult, source: needsManual ? "manual_needed" : "unavailable" };
+function tagManualFallback(factorResult, fieldKeys, manualFallback, overriddenFieldKeys) {
+  const relevant = (fieldKeys || []).filter((f) => (manualFallback || []).includes(f));
+  const missingManualFields = relevant.filter((f) => !overriddenFieldKeys.has(f));
+  const filledManualFields = relevant.filter((f) => overriddenFieldKeys.has(f));
+
+  if (factorResult.score != null) {
+    return {
+      ...factorResult,
+      source: filledManualFields.length > 0 ? "manual" : "live",
+      missingManualFields,
+      filledManualFields,
+    };
+  }
+  return {
+    ...factorResult,
+    source: missingManualFields.length > 0 ? "manual_needed" : "unavailable",
+    missingManualFields,
+    filledManualFields,
+  };
 }
 
 function renderTechnicalFactors(instrument) {
   return TECHNICAL_FACTORS.map((f) => ({
     key: f.key,
     label: f.label,
-    ...tagManualFallback(f.scorer(instrument), [], []), // technical gaps are data-history gaps, not manual-fallback fields
+    // technical gaps are data-history gaps, not manual-fallback fields
+    ...tagManualFallback(f.scorer(instrument), [], [], new Set()),
   }));
 }
 
-function renderFundamentalFactors(instrument, manualFallback) {
+function renderFundamentalFactors(instrument, manualFallback, overriddenFieldKeys) {
   return FUNDAMENTAL_FACTORS.map((f) => ({
     key: f.key,
     label: f.label,
-    ...tagManualFallback(f.scorer(instrument), f.fields, manualFallback),
+    ...tagManualFallback(f.scorer(instrument), f.fields, manualFallback, overriddenFieldKeys),
   }));
 }
 
-function renderMarketSpecificFactors(instrument, manualFallback) {
+function renderMarketSpecificFactors(instrument, manualFallback, overriddenFieldKeys) {
   const ms = instrument.marketSpecific || {};
   return Object.keys(ms).map((key) => {
     const val = ms[key];
     const scorer = MARKET_SPECIFIC_SCORERS[key];
+    const isManualField = (manualFallback || []).includes(key);
+    const missingManualFields = isManualField && !overriddenFieldKeys.has(key) ? [key] : [];
+    const filledManualFields = isManualField && overriddenFieldKeys.has(key) ? [key] : [];
+
     if (val == null || !scorer) {
-      const needsManual = (manualFallback || []).includes(key);
       return {
         key,
         label: MARKET_SPECIFIC_LABELS[key] || key,
         score: null,
         status: "unavailable",
         value: (MARKET_SPECIFIC_LABELS[key] || key) + " unavailable",
-        source: needsManual ? "manual_needed" : "unavailable",
+        source: missingManualFields.length > 0 ? "manual_needed" : "unavailable",
+        missingManualFields,
+        filledManualFields,
       };
     }
     const r = scorer(val);
-    return { key, label: MARKET_SPECIFIC_LABELS[key] || key, score: r.score, status: statusFromScore(r.score), value: r.value, source: "live" };
+    return {
+      key,
+      label: MARKET_SPECIFIC_LABELS[key] || key,
+      score: r.score,
+      status: statusFromScore(r.score),
+      value: r.value,
+      source: filledManualFields.length > 0 ? "manual" : "live",
+      missingManualFields,
+      filledManualFields,
+    };
   });
 }
 
@@ -406,13 +545,13 @@ function groupScore(factorResults) {
   return scored.reduce((a, b) => a + b, 0) / scored.length; // full precision, no intermediate rounding
 }
 
-function calculateTradeScore(instrument) {
+function calculateTradeScore(instrument, overriddenFieldKeys = new Set()) {
   const manualFallback = instrument.manualFallback || [];
 
   const technicalFactors = renderTechnicalFactors(instrument);
   const fundamentalFactors = [
-    ...renderFundamentalFactors(instrument, manualFallback),
-    ...renderMarketSpecificFactors(instrument, manualFallback),
+    ...renderFundamentalFactors(instrument, manualFallback, overriddenFieldKeys),
+    ...renderMarketSpecificFactors(instrument, manualFallback, overriddenFieldKeys),
   ];
 
   const technicalScore = groupScore(technicalFactors);
@@ -541,14 +680,25 @@ async function fetchInstrument(symbol) {
       return;
     }
 
-    const score = calculateTradeScore(data.instrument);
-    currentResult = { instrument: data.instrument, meta: data.meta, score };
-    renderResult();
+    currentResult = { rawInstrument: data.instrument, meta: data.meta };
+    rescore();
   } catch (err) {
     if (err.name === "AbortError") return; // superseded by a newer request
     if (requestId !== currentRequestId) return;
     renderError("Unable to load TradeIQ analysis. Please try again.");
   }
+}
+
+// Recomputes score from the raw fetched instrument plus this browser's
+// saved manual overrides for the current ticker — no network call needed,
+// so adding/editing/clearing a manual value updates the UI instantly.
+function rescore() {
+  if (!currentResult || !currentResult.rawInstrument) return;
+  const overriddenFieldKeys = new Set(Object.keys(manualOverrides[currentTicker] || {}));
+  const instrument = applyManualOverrides(currentResult.rawInstrument, currentTicker);
+  currentResult.instrument = instrument;
+  currentResult.score = calculateTradeScore(instrument, overriddenFieldKeys);
+  renderResult();
 }
 
 /* =========================================================================
@@ -692,6 +842,7 @@ function renderResult() {
     row.className = "flag-row";
     const dotColor = statusColor(f.status);
     const tag = f.source === "manual_needed" ? '<span class="flag-tag">manual entry needed</span>' : "";
+    const manualHtml = renderManualEntrySection(f);
     row.innerHTML = `
       <div class="flag-top">
         <div class="flag-dot" style="background:${dotColor}"></div>
@@ -700,15 +851,68 @@ function renderResult() {
         <div class="flag-value">${escapeHtml(f.value)}</div>
         <div class="flag-chevron">${quickMode ? "" : "›"}</div>
       </div>
+      ${manualHtml ? `<div class="manual-entry-row">${manualHtml}</div>` : ""}
       ${quickMode ? "" : `<div class="flag-explainer">${escapeHtml(EXPLAINERS[f.key] || "")}</div>`}
     `;
     if (!quickMode) row.onclick = () => row.classList.toggle("open");
     else row.style.cursor = "default";
+    wireManualEntryEvents(row);
     flagsList.appendChild(row);
   });
 
   document.getElementById("flagsTitle").textContent =
     "signals & flags" + (quickMode ? " · quick mode" : " · tap to explain");
+}
+
+// Builds the inline manual-entry HTML for a flag: an input+Save per still-
+// missing field, and a removable tag per already-filled field. Independent
+// of quick mode — this is data entry, not an explainer.
+function renderManualEntrySection(f) {
+  let html = "";
+  (f.filledManualFields || []).forEach((fk) => {
+    const meta = FIELD_META[fk] || { label: fk, unit: "raw" };
+    const raw = (manualOverrides[currentTicker] || {})[fk];
+    const display = raw == null ? "" : (meta.unit === "percent" ? (raw * 100).toFixed(1) + "%" : raw.toFixed(2));
+    html += `<span class="manual-filled-tag">manual: ${escapeHtml(meta.label)} ${display}<span class="manual-clear-btn" data-clear-field="${escapeHtml(fk)}">✕</span></span>`;
+  });
+  (f.missingManualFields || []).forEach((fk) => {
+    const meta = FIELD_META[fk] || { label: fk, unit: "raw", placeholder: "" };
+    html += `<span class="manual-input-group">
+      <label>${escapeHtml(meta.label)}${meta.unit === "percent" ? " %" : ""}</label>
+      <input type="number" step="any" class="manual-input" data-field="${escapeHtml(fk)}" placeholder="${escapeHtml(meta.placeholder || "")}">
+      <span class="manual-save-btn" data-save-field="${escapeHtml(fk)}">Save</span>
+    </span>`;
+  });
+  return html;
+}
+
+function wireManualEntryEvents(row) {
+  row.querySelectorAll(".manual-save-btn").forEach((btn) => {
+    btn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      const fk = btn.getAttribute("data-save-field");
+      const input = row.querySelector(`.manual-input[data-field="${fk}"]`);
+      if (input && saveManualField(currentTicker, fk, input.value)) rescore();
+    });
+  });
+  row.querySelectorAll(".manual-input").forEach((input) => {
+    input.addEventListener("click", (e) => e.stopPropagation());
+    input.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") {
+        e.stopPropagation();
+        const fk = input.getAttribute("data-field");
+        if (saveManualField(currentTicker, fk, input.value)) rescore();
+      }
+    });
+  });
+  row.querySelectorAll(".manual-clear-btn").forEach((btn) => {
+    btn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      const fk = btn.getAttribute("data-clear-field");
+      clearManualField(currentTicker, fk);
+      rescore();
+    });
+  });
 }
 
 function escapeHtml(str) {
@@ -732,7 +936,10 @@ document.getElementById("tickerInput").value = currentTicker;
 // Expose scoring/validation for dry-run testing (harmless extra globals in
 // the browser; used by the Node-based synthetic contract test harness).
 if (typeof globalThis !== "undefined") {
-  globalThis.TradeIQ = { calculateTradeScore, validateContract, SCORE_CONFIG };
+  globalThis.TradeIQ = {
+    calculateTradeScore, validateContract, SCORE_CONFIG,
+    applyManualOverrides, saveManualField, clearManualField, FIELD_META,
+  };
 }
 
 fetchInstrument(currentTicker);
