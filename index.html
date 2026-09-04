@@ -127,7 +127,13 @@
   }
   .manual-clear-btn{cursor:pointer; opacity:.7; font-size:11px;}
   .manual-clear-btn:hover{opacity:1;}
+  .manual-add-link{
+    font-family:var(--mono); font-size:10.5px; color:var(--muted); cursor:pointer;
+    border-bottom:1px dotted var(--muted); padding-bottom:1px; white-space:nowrap;
+  }
+  .manual-add-link:hover{color:var(--paper); border-bottom-color:var(--paper);}
   .manual-input-group{display:inline-flex; align-items:center; gap:5px;}
+  .manual-input-group.hidden{display:none;}
   .manual-input-group label{font-family:var(--mono); font-size:10.5px; color:var(--muted); white-space:nowrap;}
   .manual-input-group input{
     width:72px; background:var(--panel-raised); border:1px solid var(--line); color:var(--paper);
@@ -875,9 +881,14 @@ function renderManualEntrySection(f) {
     const display = raw == null ? "" : (meta.unit === "percent" ? (raw * 100).toFixed(1) + "%" : raw.toFixed(2));
     html += `<span class="manual-filled-tag">manual: ${escapeHtml(meta.label)} ${display}<span class="manual-clear-btn" data-clear-field="${escapeHtml(fk)}">✕</span></span>`;
   });
+  // Missing fields default to a small "+ add" link, not an open input box —
+  // most people will never touch this, and it shouldn't be in their way.
+  // Clicking it reveals the actual input, one tap away for anyone who does
+  // want to fill it in.
   (f.missingManualFields || []).forEach((fk) => {
     const meta = FIELD_META[fk] || { label: fk, unit: "raw", placeholder: "" };
-    html += `<span class="manual-input-group">
+    html += `<span class="manual-add-link" data-add-field="${escapeHtml(fk)}">+ add ${escapeHtml(meta.label)} (optional)</span>
+    <span class="manual-input-group hidden" data-field-group="${escapeHtml(fk)}">
       <label>${escapeHtml(meta.label)}${meta.unit === "percent" ? " %" : ""}</label>
       <input type="number" step="any" class="manual-input" data-field="${escapeHtml(fk)}" placeholder="${escapeHtml(meta.placeholder || "")}">
       <span class="manual-save-btn" data-save-field="${escapeHtml(fk)}">Save</span>
@@ -887,6 +898,19 @@ function renderManualEntrySection(f) {
 }
 
 function wireManualEntryEvents(row) {
+  row.querySelectorAll(".manual-add-link").forEach((link) => {
+    link.addEventListener("click", (e) => {
+      e.stopPropagation();
+      const fk = link.getAttribute("data-add-field");
+      const group = row.querySelector(`.manual-input-group[data-field-group="${fk}"]`);
+      if (group) {
+        group.classList.remove("hidden");
+        link.style.display = "none";
+        const input = group.querySelector("input");
+        if (input) input.focus();
+      }
+    });
+  });
   row.querySelectorAll(".manual-save-btn").forEach((btn) => {
     btn.addEventListener("click", (e) => {
       e.stopPropagation();
