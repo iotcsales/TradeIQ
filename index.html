@@ -559,7 +559,7 @@ function groupScore(factorResults) {
   return scored.reduce((a, b) => a + b, 0) / scored.length; // full precision, no intermediate rounding
 }
 
-function calculateTradeScore(instrument, overriddenFieldKeys = new Set()) {
+function calculateTradeScore(instrument, overriddenFieldKeys = new Set(), meta = null) {
   const manualFallback = instrument.manualFallback || [];
 
   const technicalFactors = renderTechnicalFactors(instrument);
@@ -609,7 +609,7 @@ function calculateTradeScore(instrument, overriddenFieldKeys = new Set()) {
     // Market-specific signals are kept separate — see marketSpecificFactors.
     flags: [...technicalFactors, ...universalFundamentalFactors],
     marketSpecificFactors,
-    methodologyVersion: instrument.meta?.methodologyVersion || null,
+    methodologyVersion: meta?.methodologyVersion || null,
     scoringEngineVersion: SCORING_CONFIG.version,
   };
 }
@@ -748,7 +748,7 @@ function rescore() {
   const overriddenFieldKeys = new Set(Object.keys(manualOverrides[currentTicker] || {}));
   const instrument = applyManualOverrides(currentResult.rawInstrument, currentTicker);
   currentResult.instrument = instrument;
-  currentResult.score = calculateTradeScore(instrument, overriddenFieldKeys);
+  currentResult.score = calculateTradeScore(instrument, overriddenFieldKeys, currentResult.meta);
   renderResult();
 }
 
