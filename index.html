@@ -652,6 +652,18 @@ function submitTickerSearch() {
   fetchInstrument(raw);
 }
 
+// Builds the ticker attempts to try, in order. A symbol that already has an
+// exchange suffix (a dot, e.g. "RELIANCE.NS") is tried as-is only — we
+// don't second-guess an explicit suffix. A bare symbol is tried plain first
+// (covers US tickers), then with ".NS" appended — most people won't know
+// NSE requires that suffix on Yahoo's feed, so the app tries it for them
+// rather than making that someone's homework.
+function buildTickerCandidates(rawSymbol) {
+  const s = rawSymbol.trim().toUpperCase();
+  if (s.includes(".")) return [s];
+  return [s, s + ".NS"];
+}
+
 async function fetchInstrument(symbol) {
   const requestId = ++currentRequestId;
   if (currentAbortController) currentAbortController.abort();
@@ -664,30 +676,50 @@ async function fetchInstrument(symbol) {
     return;
   }
 
+  const candidates = buildTickerCandidates(symbol);
+
   try {
-    const res = await fetch(WORKER_URL + "?ticker=" + encodeURIComponent(symbol), {
-      signal: currentAbortController.signal,
-    });
-    const data = await res.json().catch(() => null);
+    for (const candidate of candidates) {
+      const res = await fetch(WORKER_URL + "?ticker=" + encodeURIComponent(candidate), {
+        signal: currentAbortController.signal,
+      });
 
-    // A newer request has since been kicked off — discard this result.
-    if (requestId !== currentRequestId) return;
+      // A newer request has since been kicked off — discard this result.
+      if (requestId !== currentRequestId) return;
 
-    if (res.status === 404) {
-      renderError(`No data found for "${symbol}". Check the symbol and try again.`);
+      if (res.status === 404) continue; // try the next candidate, if any
+
+      const data = await res.json().catch(() => null);
+      if (requestId !== currentRequestId) return;
+
+      if (!res.ok || !data) {
+        renderError("Unable to load TradeIQ analysis. Please try again.");
+        return;
+      }
+      if (!validateContract(data)) {
+        renderError("Invalid TradeIQ data response.");
+        return;
+      }
+
+      // Found it — reflect the resolved symbol (e.g. "AXISBANK" -> "AXISBANK.NS")
+      // in state and the search box, so manual overrides and re-selection
+      // key off the symbol that actually worked.
+      currentTicker = candidate;
+      const inputEl = document.getElementById("tickerInput");
+      if (inputEl) inputEl.value = candidate;
+
+      currentResult = { rawInstrument: data.instrument, meta: data.meta };
+      rescore();
       return;
     }
-    if (!res.ok || !data) {
-      renderError("Unable to load TradeIQ analysis. Please try again.");
-      return;
-    }
-    if (!validateContract(data)) {
-      renderError("Invalid TradeIQ data response.");
-      return;
-    }
 
-    currentResult = { rawInstrument: data.instrument, meta: data.meta };
-    rescore();
+    // Every candidate came back 404.
+    const triedNS = candidates.length > 1;
+    renderError(
+      triedNS
+        ? `No data found for "${symbol}" or "${symbol}.NS". Check the symbol and try again.`
+        : `No data found for "${symbol}". Check the symbol and try again.`
+    );
   } catch (err) {
     if (err.name === "AbortError") return; // superseded by a newer request
     if (requestId !== currentRequestId) return;
