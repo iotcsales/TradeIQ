@@ -87,6 +87,15 @@
     font-size:11px; color:var(--muted); line-height:1.5; padding:10px 12px; margin-bottom:14px;
     border:1px dashed var(--line); border-radius:4px;
   }
+  .intraday-row{
+    display:flex; align-items:center; gap:8px; border-bottom:1px solid var(--line);
+    padding:10px 2px; flex-wrap:wrap;
+  }
+  .intraday-row:last-child{border-bottom:none;}
+  .intraday-symbol{font-family:var(--mono); font-size:13px; width:100px; flex-shrink:0;}
+  .intraday-metric{font-family:var(--mono); font-size:11px; color:var(--muted); width:80px;}
+  .intraday-metric .v{display:block; font-size:13px; margin-top:1px;}
+  .intraday-updated{font-family:var(--mono); font-size:9.5px; color:var(--muted); width:100%; margin-top:2px;}
   .radar-card{
     background:var(--panel); border:1px solid var(--line); border-radius:4px;
     padding:14px; margin-bottom:12px;
@@ -248,6 +257,7 @@
   </div>
 
   <div class="discover-link" id="radarLink" style="color:var(--bull); border-bottom-color:var(--bull);">📡 Daily Radar — Today's strongest NSE opportunities</div>
+  <div class="discover-link" id="intradayLink" style="color:#E4573D; border-bottom-color:#E4573D;">⚡ Intraday Screener — NSE, market hours only</div>
   <div class="discover-link" id="discoverLink">📊 Today's Top Picks</div>
 
   <div id="searchArea">
@@ -258,6 +268,14 @@
   <div class="ticker-search-error" id="tickerSearchError"></div>
   <div class="ticker-row" id="tickerRow"></div>
   <div class="data-status" id="dataStatus"></div>
+  </div>
+
+  <div id="intradayPanel" style="display:none;">
+    <div class="radar-guardrail" style="border-color:#E4573D; color:#E4573D;">
+      Intraday trading carries substantially higher risk than longer-horizon investing — regulatory studies have found the large majority of individual intraday traders lose money over time. This is a screener showing disclosed, raw intraday metrics — not a recommendation, not a signal to trade, not a prediction of what happens next.
+    </div>
+    <div class="discover-meta" id="intradayMeta"></div>
+    <div id="intradayList"></div>
   </div>
 
   <div id="radarPanel" style="display:none;">
@@ -272,6 +290,7 @@
 
   <div id="mainPanels">
   <div class="score-panel" id="scorePanel"></div>
+
 
   <div class="section-title" id="flagsTitle">signals &amp; flags</div>
   <div class="score-panel" style="padding:4px 14px;" id="flagsList"></div>
@@ -764,6 +783,7 @@ function showDiscoverView() {
   document.getElementById("mainPanels").style.display = "none";
   document.getElementById("searchArea").style.display = "none";
   document.getElementById("radarPanel").style.display = "none";
+  document.getElementById("intradayPanel").style.display = "none";
   document.getElementById("discoverPanel").style.display = "";
   fetchDiscoverList();
 }
@@ -771,12 +791,22 @@ function showRadarView() {
   document.getElementById("mainPanels").style.display = "none";
   document.getElementById("searchArea").style.display = "none";
   document.getElementById("discoverPanel").style.display = "none";
+  document.getElementById("intradayPanel").style.display = "none";
   document.getElementById("radarPanel").style.display = "";
   fetchRadarList();
+}
+function showIntradayView() {
+  document.getElementById("mainPanels").style.display = "none";
+  document.getElementById("searchArea").style.display = "none";
+  document.getElementById("discoverPanel").style.display = "none";
+  document.getElementById("radarPanel").style.display = "none";
+  document.getElementById("intradayPanel").style.display = "";
+  fetchIntradayList();
 }
 function showSearchView() {
   document.getElementById("discoverPanel").style.display = "none";
   document.getElementById("radarPanel").style.display = "none";
+  document.getElementById("intradayPanel").style.display = "none";
   document.getElementById("searchArea").style.display = "";
   document.getElementById("mainPanels").style.display = "";
 }
@@ -933,6 +963,90 @@ async function fetchRadarList() {
     });
   } catch (err) {
     listEl.innerHTML = '<div class="state-msg error">Unable to load Daily Radar. Please try again.</div>';
+  }
+}
+
+// ---- Intraday Screener ----
+// NSE-only, market-hours-only. Deliberately shows raw disclosed metrics
+// (gap %, relative volume, range, position) with no invented composite
+// score — a screener, not a ranking-as-recommendation.
+
+function fmtPctSigned(decimal) {
+  if (decimal == null) return "—";
+  const pct = (decimal * 100).toFixed(2);
+  return (decimal >= 0 ? "+" : "") + pct + "%";
+}
+function fmtRelVol(v) {
+  if (v == null) return "—";
+  return v.toFixed(2) + "x";
+}
+
+async function fetchIntradayList() {
+  const listEl = document.getElementById("intradayList");
+  const metaEl = document.getElementById("intradayMeta");
+  listEl.innerHTML = '<div class="state-msg">Loading Intraday Screener…</div>';
+  metaEl.textContent = "";
+
+  if (!WORKER_URL) {
+    listEl.innerHTML = '<div class="state-msg error">TradeIQ Worker is not configured yet.</div>';
+    return;
+  }
+
+  try {
+    const res = await fetch(WORKER_URL + "?mode=intraday");
+    const data = await res.json().catch(() => null);
+
+    if (!data) {
+      listEl.innerHTML = '<div class="state-msg error">Unable to load Intraday Screener. Please try again.</div>';
+      return;
+    }
+
+    if (data.marketOpen === false) {
+      metaEl.textContent = "";
+      listEl.innerHTML = `<div class="state-msg">${escapeHtml(data.message || "Market is closed.")}</div>`;
+      return;
+    }
+
+    if (res.status === 503) {
+      listEl.innerHTML = `<div class="state-msg">${escapeHtml(data.message || "Intraday Screener is still warming up. Check back in a few minutes.")}</div>`;
+      return;
+    }
+    if (!res.ok || !Array.isArray(data.results)) {
+      listEl.innerHTML = '<div class="state-msg error">Unable to load Intraday Screener. Please try again.</div>';
+      return;
+    }
+
+    metaEl.textContent = `NSE · Scanned ${data.scannedCount} of ${data.universeSize} · Refreshed ${new Date(data.generatedAt).toLocaleTimeString()}`;
+
+    listEl.innerHTML = "";
+    if (data.results.length === 0) {
+      listEl.innerHTML = '<div class="state-msg">No data yet — the first scan cycle is still in progress.</div>';
+      return;
+    }
+
+    data.results.forEach((r) => {
+      const row = document.createElement("div");
+      row.className = "intraday-row";
+      const gapColor = r.gapPct == null ? "var(--muted)" : r.gapPct >= 0 ? "var(--bull)" : "var(--bear)";
+      row.innerHTML = `
+        <div class="intraday-symbol">${escapeHtml(r.symbol)}</div>
+        <div class="intraday-metric">Gap<span class="v" style="color:${gapColor}">${fmtPctSigned(r.gapPct)}</span></div>
+        <div class="intraday-metric">Rel. Volume<span class="v">${fmtRelVol(r.relativeVolume)}</span></div>
+        <div class="intraday-metric">Range<span class="v">${r.rangePct != null ? (r.rangePct * 100).toFixed(2) + "%" : "—"}</span></div>
+        <div class="intraday-metric">Pos. in range<span class="v">${r.positionInRange != null ? (r.positionInRange * 100).toFixed(0) + "%" : "—"}</span></div>
+        <div class="intraday-updated">as of ${new Date(r.lastUpdated).toLocaleTimeString()}</div>
+      `;
+      row.onclick = () => {
+        showSearchView();
+        currentTicker = r.symbol;
+        document.getElementById("tickerInput").value = r.symbol;
+        fetchInstrument(r.symbol);
+      };
+      row.style.cursor = "pointer";
+      listEl.appendChild(row);
+    });
+  } catch (err) {
+    listEl.innerHTML = '<div class="state-msg error">Unable to load Intraday Screener. Please try again.</div>';
   }
 }
 
@@ -1330,6 +1444,7 @@ document.getElementById("tickerInput").addEventListener("keydown", (e) => {
 document.getElementById("tickerInput").value = currentTicker;
 document.getElementById("discoverLink").onclick = showDiscoverView;
 document.getElementById("radarLink").onclick = showRadarView;
+document.getElementById("intradayLink").onclick = showIntradayView;
 
 // Expose scoring/validation for dry-run testing (harmless extra globals in
 // the browser; used by the Node-based synthetic contract test harness).
