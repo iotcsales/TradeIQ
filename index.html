@@ -60,6 +60,59 @@
     font-family:var(--mono); font-size:11px; color:var(--bear); margin:-4px 0 8px 2px; min-height:14px;
   }
 
+  .discover-link{
+    font-family:var(--mono); font-size:11.5px; color:var(--gold); cursor:pointer;
+    margin-bottom:16px; display:inline-block; border-bottom:1px dotted var(--gold); padding-bottom:1px;
+  }
+  .discover-link:hover{color:var(--paper); border-bottom-color:var(--paper);}
+
+  .discover-row{
+    display:flex; align-items:center; gap:10px; border-bottom:1px solid var(--line);
+    padding:11px 2px; cursor:pointer;
+  }
+  .discover-row:last-child{border-bottom:none;}
+  .discover-row:hover{background:var(--panel-raised);}
+  .discover-rank{font-family:var(--mono); font-size:11px; color:var(--muted); width:20px; flex-shrink:0;}
+  .discover-symbol{font-family:var(--mono); font-size:13px; flex:1;}
+  .discover-market{font-size:10px; color:var(--muted); margin-left:6px;}
+  .discover-score{font-family:var(--mono); font-size:14px; font-weight:600; width:34px; text-align:right;}
+  .discover-verdict{
+    font-family:var(--mono); font-size:10px; padding:2px 6px; border-radius:2px; width:78px; text-align:center;
+  }
+  .discover-meta{
+    font-family:var(--mono); font-size:10.5px; color:var(--muted); margin-bottom:10px; padding:0 2px;
+  }
+
+  .radar-guardrail{
+    font-size:11px; color:var(--muted); line-height:1.5; padding:10px 12px; margin-bottom:14px;
+    border:1px dashed var(--line); border-radius:4px;
+  }
+  .radar-card{
+    background:var(--panel); border:1px solid var(--line); border-radius:4px;
+    padding:14px; margin-bottom:12px;
+  }
+  .radar-card-head{display:flex; align-items:baseline; gap:8px; margin-bottom:2px;}
+  .radar-rank{font-family:var(--mono); font-size:12px; color:var(--muted);}
+  .radar-symbol{font-family:var(--mono); font-size:15px; font-weight:600; flex:1;}
+  .radar-sector{font-size:10.5px; color:var(--muted);}
+  .radar-scores{display:flex; gap:16px; margin:8px 0 10px;}
+  .radar-score-block .lbl{font-size:10px; color:var(--muted);}
+  .radar-score-block .val{font-family:var(--mono); font-size:20px; font-weight:700;}
+  .radar-chips{display:flex; flex-wrap:wrap; gap:6px; margin-bottom:10px;}
+  .radar-chip{
+    font-family:var(--mono); font-size:10px; padding:3px 7px; border-radius:2px;
+    border:1px solid var(--line); color:var(--muted);
+  }
+  .radar-why{font-size:12px; line-height:1.6; margin-bottom:6px;}
+  .radar-why-item{color:var(--bull);}
+  .radar-why-item::before{content:"+ ";}
+  .radar-risk{font-size:12px; color:var(--bear); margin-bottom:10px;}
+  .radar-risk::before{content:"⚠ ";}
+  .radar-analyze-btn{
+    font-family:var(--mono); font-size:11.5px; background:var(--gold); color:var(--ink);
+    border-radius:3px; padding:6px 12px; text-align:center; cursor:pointer; display:inline-block;
+  }
+
   .ticker-row{display:flex; gap:8px; margin-bottom:8px;}
   .ticker-btn{
     flex:1; background:var(--panel); border:1px solid var(--line); color:var(--muted);
@@ -166,6 +219,19 @@
     margin-top:20px; padding:12px 14px; border:1px dashed var(--line); border-radius:4px;
     font-size:11.5px; color:var(--muted); line-height:1.6;
   }
+
+  .news-note{
+    font-family:var(--mono); font-size:10px; color:var(--muted); margin-bottom:8px; padding:0 2px;
+  }
+  .news-item{
+    display:block; padding:10px 2px; border-bottom:1px solid var(--line);
+    color:var(--paper); text-decoration:none; font-size:13px; line-height:1.4;
+  }
+  .news-item:last-child{border-bottom:none;}
+  .news-item:hover{color:var(--gold);}
+  .news-item .news-date{
+    display:block; font-family:var(--mono); font-size:10px; color:var(--muted); margin-top:3px;
+  }
 </style>
 </head>
 <body>
@@ -181,6 +247,10 @@
     <span class="sub">phase 2 — live</span>
   </div>
 
+  <div class="discover-link" id="radarLink" style="color:var(--bull); border-bottom-color:var(--bull);">📡 Daily Radar — Today's strongest NSE opportunities</div>
+  <div class="discover-link" id="discoverLink">📊 Today's Top Picks</div>
+
+  <div id="searchArea">
   <div class="ticker-search">
     <input type="text" id="tickerInput" placeholder="Enter ticker — e.g. AAPL or RELIANCE.NS" autocomplete="off" spellcheck="false">
     <button id="tickerGoBtn">Go</button>
@@ -188,7 +258,19 @@
   <div class="ticker-search-error" id="tickerSearchError"></div>
   <div class="ticker-row" id="tickerRow"></div>
   <div class="data-status" id="dataStatus"></div>
+  </div>
 
+  <div id="radarPanel" style="display:none;">
+    <div class="discover-meta" id="radarMeta"></div>
+    <div id="radarList"></div>
+  </div>
+
+  <div id="discoverPanel" style="display:none;">
+    <div class="discover-meta" id="discoverMeta"></div>
+    <div class="score-panel" style="padding:4px 14px;" id="discoverList"></div>
+  </div>
+
+  <div id="mainPanels">
   <div class="score-panel" id="scorePanel"></div>
 
   <div class="section-title" id="flagsTitle">signals &amp; flags</div>
@@ -196,6 +278,13 @@
 
   <div class="section-title" id="marketSpecificTitle" style="display:none;">market-specific signals</div>
   <div class="score-panel" style="padding:4px 14px; display:none;" id="marketSpecificList"></div>
+
+  <div class="section-title" id="newsTitle" style="display:none;">recent news</div>
+  <div id="newsPanel" style="display:none;">
+    <div class="news-note">Unscored context — not part of the composite score. Read and judge for yourself.</div>
+    <div class="score-panel" style="padding:4px 14px;" id="newsList"></div>
+  </div>
+  </div>
 
   <div class="mode-toggle">
     <span class="txt">quick mode (hide explainers)</span>
@@ -665,6 +754,188 @@ function submitTickerSearch() {
   fetchInstrument(raw);
 }
 
+// ---- Discover (Today's Top Picks) ----
+// Reads the Worker's pre-ranked screener cache — no live per-ticker fetch
+// here, so this loads instantly regardless of how large the scan universe
+// is. Tapping an entry reuses the existing single-ticker fetch flow rather
+// than duplicating any rendering logic.
+
+function showDiscoverView() {
+  document.getElementById("mainPanels").style.display = "none";
+  document.getElementById("searchArea").style.display = "none";
+  document.getElementById("radarPanel").style.display = "none";
+  document.getElementById("discoverPanel").style.display = "";
+  fetchDiscoverList();
+}
+function showRadarView() {
+  document.getElementById("mainPanels").style.display = "none";
+  document.getElementById("searchArea").style.display = "none";
+  document.getElementById("discoverPanel").style.display = "none";
+  document.getElementById("radarPanel").style.display = "";
+  fetchRadarList();
+}
+function showSearchView() {
+  document.getElementById("discoverPanel").style.display = "none";
+  document.getElementById("radarPanel").style.display = "none";
+  document.getElementById("searchArea").style.display = "";
+  document.getElementById("mainPanels").style.display = "";
+}
+
+async function fetchDiscoverList() {
+  const listEl = document.getElementById("discoverList");
+  const metaEl = document.getElementById("discoverMeta");
+  listEl.innerHTML = '<div class="state-msg">Loading today\'s rankings…</div>';
+  metaEl.textContent = "";
+
+  if (!WORKER_URL) {
+    listEl.innerHTML = '<div class="state-msg error">TradeIQ Worker is not configured yet.</div>';
+    return;
+  }
+
+  try {
+    const res = await fetch(WORKER_URL + "?mode=discover");
+    const data = await res.json().catch(() => null);
+
+    if (res.status === 503) {
+      listEl.innerHTML = `<div class="state-msg">${escapeHtml(data?.message || "Today's rankings are still being generated. Check back soon.")}</div>`;
+      return;
+    }
+    if (!res.ok || !data || !Array.isArray(data.results)) {
+      listEl.innerHTML = '<div class="state-msg error">Unable to load today\'s rankings. Please try again.</div>';
+      return;
+    }
+
+    metaEl.textContent = `Scanned ${data.scannedCount} of ${data.universeSize} · generated ${new Date(data.generatedAt).toLocaleString()}`;
+
+    listEl.innerHTML = "";
+    data.results.slice(0, 30).forEach((r, i) => {
+      const row = document.createElement("div");
+      row.className = "discover-row";
+      const vColor = verdictColor(r.verdict);
+      row.innerHTML = `
+        <div class="discover-rank">${i + 1}</div>
+        <div class="discover-symbol">${escapeHtml(r.symbol)}<span class="discover-market">${escapeHtml(r.market)}</span></div>
+        <div class="discover-verdict" style="color:${vColor}; border:1px solid ${vColor}">${escapeHtml(r.verdict)}</div>
+        <div class="discover-score" style="color:${vColor}">${r.compositeScore}</div>
+      `;
+      row.onclick = () => {
+        showSearchView();
+        currentTicker = r.symbol;
+        document.getElementById("tickerInput").value = r.symbol;
+        fetchInstrument(r.symbol);
+      };
+      listEl.appendChild(row);
+    });
+
+    if (data.results.length === 0) {
+      listEl.innerHTML = '<div class="state-msg">No ranked results yet — check back once today\'s scan completes.</div>';
+    }
+  } catch (err) {
+    listEl.innerHTML = '<div class="state-msg error">Unable to load today\'s rankings. Please try again.</div>';
+  }
+}
+
+// ---- Daily Radar ----
+// NSE-only Opportunity Score ranking, built by the same nightly scan as
+// Discover. Reads a separate cached endpoint; drill-down reuses the exact
+// same single-ticker fetch flow as everything else in the app.
+
+function radarComponentLabel(score) {
+  if (score == null) return { text: "Unavailable", color: "var(--muted)" };
+  if (score >= 65) return { text: "Strong", color: "var(--bull)" };
+  if (score >= 45) return { text: "Moderate", color: "var(--gold)" };
+  return { text: "Weak", color: "var(--bear)" };
+}
+
+async function fetchRadarList() {
+  const listEl = document.getElementById("radarList");
+  const metaEl = document.getElementById("radarMeta");
+  listEl.innerHTML = '<div class="state-msg">Loading today\'s Daily Radar…</div>';
+  metaEl.textContent = "";
+
+  if (!WORKER_URL) {
+    listEl.innerHTML = '<div class="state-msg error">TradeIQ Worker is not configured yet.</div>';
+    return;
+  }
+
+  try {
+    const res = await fetch(WORKER_URL + "?mode=radar");
+    const data = await res.json().catch(() => null);
+
+    if (res.status === 503) {
+      listEl.innerHTML = `<div class="state-msg">${escapeHtml(data?.message || "Today's Daily Radar is still being generated. Check back soon.")}</div>`;
+      return;
+    }
+    if (!res.ok || !data || !Array.isArray(data.results)) {
+      listEl.innerHTML = '<div class="state-msg error">Unable to load Daily Radar. Please try again.</div>';
+      return;
+    }
+
+    metaEl.innerHTML =
+      `Market: ${escapeHtml(data.market)} · Scanned ${data.scannedCount} of ${data.universeSize} · ` +
+      `As of ${new Date(data.generatedAt).toLocaleString()}` +
+      `<div class="radar-guardrail">Top-ranked current opportunities based on the TradeIQ methodology — not a prediction, not a recommendation. Data is end-of-day, not real-time.</div>`;
+
+    listEl.innerHTML = "";
+    if (data.results.length === 0) {
+      listEl.innerHTML = '<div class="state-msg">No ranked opportunities yet — check back once today\'s scan completes.</div>';
+      return;
+    }
+
+    data.results.forEach((r, i) => {
+      const card = document.createElement("div");
+      card.className = "radar-card";
+      const vColor = verdictColor(r.stockScoreVerdict);
+      const tech = radarComponentLabel(r.components.technical);
+      const fund = radarComponentLabel(r.components.fundamental);
+      const sect = radarComponentLabel(r.components.sector);
+      const mom = radarComponentLabel(r.components.momentum);
+      const macro = radarComponentLabel(r.components.macro);
+
+      card.innerHTML = `
+        <div class="radar-card-head">
+          <span class="radar-rank">#${i + 1}</span>
+          <span class="radar-symbol">${escapeHtml(r.symbol)}</span>
+          <span class="radar-sector">${escapeHtml(r.sector || "Sector: Unavailable")}</span>
+        </div>
+        <div class="radar-scores">
+          <div class="radar-score-block">
+            <div class="lbl">Opportunity Score</div>
+            <div class="val" style="color:var(--gold)">${r.opportunityScore}</div>
+          </div>
+          <div class="radar-score-block">
+            <div class="lbl">TradeIQ Score</div>
+            <div class="val" style="color:${vColor}">${r.stockScore}</div>
+          </div>
+        </div>
+        <div class="radar-chips">
+          <span class="radar-chip" style="color:${tech.color}; border-color:${tech.color}">Technical: ${tech.text}</span>
+          <span class="radar-chip" style="color:${fund.color}; border-color:${fund.color}">Fundamental: ${fund.text}</span>
+          <span class="radar-chip" style="color:${sect.color}; border-color:${sect.color}">Sector: ${sect.text}</span>
+          <span class="radar-chip" style="color:${mom.color}; border-color:${mom.color}">Momentum: ${mom.text}</span>
+          <span class="radar-chip" style="color:${macro.color}; border-color:${macro.color}">Macro: ${macro.text}</span>
+          <span class="radar-chip">External Risk: Unavailable</span>
+          <span class="radar-chip">Confidence: ${escapeHtml(r.confidenceGate)}</span>
+        </div>
+        <div class="radar-why">
+          ${r.reasons.map((reason) => `<div class="radar-why-item">${escapeHtml(reason)}</div>`).join("")}
+        </div>
+        <div class="radar-risk">${escapeHtml(r.keyRisk)}</div>
+        <div class="radar-analyze-btn">Analyze Stock →</div>
+      `;
+      card.querySelector(".radar-analyze-btn").onclick = () => {
+        showSearchView();
+        currentTicker = r.symbol;
+        document.getElementById("tickerInput").value = r.symbol;
+        fetchInstrument(r.symbol);
+      };
+      listEl.appendChild(card);
+    });
+  } catch (err) {
+    listEl.innerHTML = '<div class="state-msg error">Unable to load Daily Radar. Please try again.</div>';
+  }
+}
+
 // Builds the ticker attempts to try, in order. A symbol that already has an
 // exchange suffix (a dot, e.g. "RELIANCE.NS") is tried as-is only — we
 // don't second-guess an explicit suffix. A bare symbol is tried plain first
@@ -826,6 +1097,8 @@ function renderLoading() {
   document.getElementById("flagsTitle").textContent = "signals & flags";
   document.getElementById("marketSpecificTitle").style.display = "none";
   document.getElementById("marketSpecificList").style.display = "none";
+  document.getElementById("newsTitle").style.display = "none";
+  document.getElementById("newsPanel").style.display = "none";
 }
 
 function renderError(message) {
@@ -846,6 +1119,8 @@ function renderError(message) {
   document.getElementById("flagsTitle").textContent = "signals & flags";
   document.getElementById("marketSpecificTitle").style.display = "none";
   document.getElementById("marketSpecificList").style.display = "none";
+  document.getElementById("newsTitle").style.display = "none";
+  document.getElementById("newsPanel").style.display = "none";
 }
 
 function renderResult() {
@@ -911,6 +1186,33 @@ function renderResult() {
   } else {
     marketTitle.style.display = "none";
     marketList.style.display = "none";
+  }
+
+  // Recent news: plain headlines, no scoring, no interpretation — kept
+  // visually and structurally separate from the disclosed methodology
+  // above. instrument.news is always an array (empty if the feed failed),
+  // never null, per the Worker's contract.
+  const newsList = document.getElementById("newsList");
+  const newsTitle = document.getElementById("newsTitle");
+  const newsPanel = document.getElementById("newsPanel");
+  newsList.innerHTML = "";
+  const newsItems = instrument.news || [];
+  if (newsItems.length > 0) {
+    newsItems.forEach((n) => {
+      const a = document.createElement("a");
+      a.className = "news-item";
+      a.href = n.link || "#";
+      a.target = "_blank";
+      a.rel = "noopener noreferrer";
+      const dateTxt = n.publishedAt ? new Date(n.publishedAt).toLocaleString() : "";
+      a.innerHTML = `${escapeHtml(n.title)}${dateTxt ? `<span class="news-date">${escapeHtml(dateTxt)}</span>` : ""}`;
+      newsList.appendChild(a);
+    });
+    newsTitle.style.display = "";
+    newsPanel.style.display = "";
+  } else {
+    newsTitle.style.display = "none";
+    newsPanel.style.display = "none";
   }
 }
 
@@ -1026,6 +1328,8 @@ document.getElementById("tickerInput").addEventListener("keydown", (e) => {
   if (e.key === "Enter") submitTickerSearch();
 });
 document.getElementById("tickerInput").value = currentTicker;
+document.getElementById("discoverLink").onclick = showDiscoverView;
+document.getElementById("radarLink").onclick = showRadarView;
 
 // Expose scoring/validation for dry-run testing (harmless extra globals in
 // the browser; used by the Node-based synthetic contract test harness).
